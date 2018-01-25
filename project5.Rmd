@@ -1,0 +1,225 @@
+---
+title: "Time Series ARIMA"
+author: Lin
+---
+
+The data set electricityaustralia.jmp, electricityaustralia.txt gives monthly electricity production, in millions of kilowatt hours, in Australia from January 1956 to August 1995.  In this problem you will build several models and use them to produce forecasts.  This exercise will show that different models can produce varying forecasts.  In addition, a model which fits the data well may not forecast well, and a model which forecasts well does not necessarily fit the data well.
+
+(i) plotting the log series vs. time and commenting on the evident features.
+(ii) Use the fitted model to forecast the withheld observations.  Compare the actual data to the forecasts, showing the results with a table and a plot. 
+```{r}
+elec = read.csv("electricityaustralia.txt", header = T)
+elec.ts = ts(elec[,2], start = c(1956,1), freq = 12)
+plot(elec.ts, main = "log series vs. time")
+head(elec)
+attach(elec)
+```
+
+Withhold the last twelve observations of the log series and build a model with a sixth-degree polynomial time trend, month dummies, and the calendar trigonometric variables at frequency 0.348.  
+(i)  Perform a thorough residual analysis, including a spectral plot. 
+```{r}
+spectrum(model1.ts, span = 13)
+plot(ts(resid(model1)))
+acf(model1.ts, lag = 36)
+pacf(model1.ts, lag = 36)
+qqnorm(ts(resid(model2)))
+bartlettB.test(resid(model2))
+
+################try
+sel2<-465:476
+beta<-coef(model1)
+nTime = as.numeric(elec$Time)
+xmatrix<-matrix(c(rep(1,12),nTime[sel2],(nTime^2)[sel2],
+                  (nTime^3)[sel2],(nTime^4)[sel2],(nTime^5)[sel2],
+                  (nTime^6)[sel2],rep(0,5),
+                  rep(c(1,rep(0,12)),6),1,
+                  rep(c(1,rep(0,12)),3),1,
+                  rep(0,8),elec$c348[sel2],
+                  elec$s348[sel2]),nrow=12,ncol=20)
+pred.b<-xmatrix%*%beta
+pred.b
+comparison.1 = data.frame("pred.b" = pred.b, real.value = elec$logmKWH[465:476])
+plot(pred.b, type = "l", col="red", ylim = c(9.3, 9.7))
+lines(elec[465:476,]$logmKWH, type = "l", col="blue")
+legend("topleft",legend=c("pred.b", "true.value"),
+       col=c("red", "blue"), lty = 1:1)
+errorb = sum((pred.b-elec$logmKWH[465:476])^2)
+
+#this means there is not reduced to white noice. null hypo: there has been rejrection to 
+#white noice
+bartlettB.test(resid(model1))
+length(elec.without.twelve$logmKWH)
+1.36/sqrt(464/2)
+```
+
+Now change the polynomial time trend to second degree.
+```{r}
+model2 = lm(logmKWH ~ Time +  I(Time^2) + fmonth + c348 + s348, data = elec.without.twelve); summary(model2)
+resids2 = resid(model2)
+model2.ts = ts(resid(model2))
+spectrum(resids2, span = 13)
+plot(ts(resid(model2)))
+acf(model2.ts, lag = 36)
+pacf(model2.ts, lag = 36)
+#did not reduce. null: we have reduced to the white noise.
+bartlettB.test(resid(model2))
+qqnorm(resid(model2))
+
+sel2<-465:476
+beta2<-coef(model2)
+xmatrix<-matrix(c(rep(1,12),nTime[sel2],(nTime^2)[sel2],
+                  rep(0,5),rep(c(1,rep(0,12)),6),1,
+                  rep(c(1,rep(0,12)),3),1,rep(0,8),
+                  c348[sel2],s348[sel2]),nrow=12,ncol=16)
+pred.c<-xmatrix%*%beta2
+pred.c
+
+errorc = sum((pred.c-elec$logmKWH[465:476])^2)
+comparison.2 = data.frame("pred.c" = pred.c, real.value = elec$logmKWH[465:476])
+plot(pred.c, type = "l", col="red", ylim = c(9.3, 9.7))
+lines(elec[465:476,]$logmKWH, type = "l", col="blue")
+legend("bottomright",legend=c("pred.c", "true.value"),
+       col=c("red", "blue"), lty = 1:1)
+```
+
+Fit a seasonal ARIMA model to the log series with the last twelve observations withheld.  
+(i)  Perform a thorough residual analysis, including a spectral plot. 
+(ii)  Use the fitted model to forecast the withheld observations.  Compare the actual data to the forecasts, showing the results with a table and a plot.  
+```{r}
+arimamodel2 <- arima(ts(elec.without.twelve$logmKWH, frequency = 12), 
+                     order=c(4,0,0),
+                     seasonal=list(order=c(0,1,2),period=12))
+arimamodel2
+qqnorm(ts(resid(arimamodel2)))
+acf(ts(resid(arimamodel2)), lag = 36)
+pacf(ts(resid(arimamodel2)), lag = 36)
+#residual analysis 
+spectrum(ts(resid(arimamodel2)), span = 25)
+qqnorm(resid(arimamodel2))
+plot(ts(resid(arimamodel2)))
+library("hwwntest")
+#reduced to white noise. 5% level
+bartlettB.test(resid(arimamodel2))
+length(elec.without.twelve$logmKWH)
+1.36/sqrt(464/2)
+
+pred.d = predict(arimamodel2, n.ahead = 12)
+pred.d2 = as.numeric(pred.d$pred)
+comparison.3 = data.frame("pred.d2" = pred.d$pred, "real.value" = elec$logmKWH[465:476])
+errord2 = sum((pred.d2-elec$logmKWH[465:476])^2)
+plot(pred.d2, type = "l", col="red", ylim = c(9.40,9.65))
+lines(elec$logmKWH[465:476], type = "l", col="blue")
+legend("topleft",legend=c("pred.d2", "true.value"),
+       col=c("red", "blue"), lty = 1:1)
+
+```
+
+The regression model fit in part (b) can be improved by adding the lagged residuals as an explanatory variable.  Add the lagged residuals to the model in (b), and examine the residuals from this new fit and comment on the adequacy of the model.  Note that this new model cannot be used to forecast the withheld observations.
+```{r}
+#1.e.NOT ADEQUATE
+lagresid<-c(NA,resid(model1)[1:464]) 
+elec.without.twelve$lagresid = lagresid[-1]
+lagresid
+model4 = lm(logmKWH ~ fmonth + Time + I(Time^2) +
+              I(Time^3) + I(Time^4) + I(Time^5) + I(Time^6) +
+              c348 + s348 + lagresid, data = elec.without.twelve); summary(model4)
+#residuals
+
+resids4 = resid(model4)
+#trend, and frequency
+spectrum(ts(resids4), span = 13)
+plot(ts(resid(model4)))
+acf(ts(resid(model4)), lag = 36)
+pacf(ts(resid(model4)), lag = 36)
+bartlettB.test(resid(model4))
+qqnorm(ts(resid(model4)))
+```
+
+The seasonal ARIMA model fit in part (d) can be improved by addressing calendar variation.  To do so, complete the following steps.  
+(i)  Fit a regression to the log series with only the two calendar trigonometric variable pairs, at frequencies 0.348 and 0.432.  Although the calendar variables are not significant, retain them nonetheless.  
+(ii)  Fit the seasonal ARIMA model you chose in part (d) to these residuals, and save the ARIMA predictions from it
+(iii)  To get the forecasts of the withheld log series data, add the predictions in (i) and the predictions in (ii).  (iv)  Finally, compare these forecasts to those obtained in (d), showing the results with a table and a plot, and comment on the difference between the two.
+
+```{r}
+names(elec.without.twelve)
+model5 = lm(logmKWH ~ c348 + 
+              s348 + c432 + s432, data = elec.without.twelve); summary(model5)
+#residuals 
+resids5 = resid(model5)
+#trend, and frequency
+spectrum(ts(resids5), span = 13)
+plot(ts(resid(model5)))
+acf(ts(resid(model5)))
+pacf(ts(resid(model5)))
+bartlettB.test(resid(model5))
+qqnorm(resid(model5))
+
+
+##predictions
+predict.model5 = predict(model5, elec[465:476,])
+model5.ts = ts(resid(model5))
+arimamodel5= arima(model5.ts, order = c(4,0,0), seasonal = list(order = c(0,1,2), period = 12))
+prdict.model5.arima = predict(arimamodel5, n.ahead = 12)
+prediction.model5.arima = prdict.model5.arima$pred[1:12]
+pred.f=predict.model5 + prediction.model5.arima
+comparison.f = data.frame("pred.f" = pred.f, real.value = elec$logmKWH[465:476])
+plot(ts(pred.f), type = "l", col="red", ylim = c(9.40,9.65))
+lines(ts(pred.d2), type = "l", col="blue")
+legend("topleft",legend=c("pred.f", "pred.d2"),
+       col=c("red", "blue"), lty = 1:1)
+```
+
+
+(g)  Construct the composite forecast given by the equal-weighted average of the forecasts in parts (b), (c), and (d).  Form a single time series plot showing five series:  the withheld twelve observations, the regression forecasts from (b) and (c), the ARIMA forecast from (d), and the composite forecast.  Discuss this plot.  In particular, which forecasts appear closest to the withheld data, and which are farthest away from the withheld data?  Which forecasts tend to underpredict, and which tend to overpredict?
+```{r}
+composite = 1/3*(pred.b + pred.c + pred.d2)
+composite = as.numeric(composite)
+plot(elec$logmKWH[465:476], type = "l", col="red", ylim = c(9.25,9.7))
+lines(pred.b, type = "l", col="black")
+lines(pred.c, type = "l", col = "blue")
+lines(pred.d2,type = "l", col = "green")
+lines(composite, type = "l", col = "brown")
+legend("bottomright",legend=c("True.value", "pred.b", "pred.c", "pred.d2", "composite"),
+       col=c("red", "black", "blue", "green", "brown"), lty = 1:1, cex = 0.5)
+```
+
+
+(h)  For each of the four forecasts, calculate the sum of squared forecast errors.  Which forecasts are best via this measure of discrepancy, and which are worst?  
+```{r}
+errorf = sum((pred.f-elec$logmKWH[465:476])^2)
+errorc = sum((pred.c-elec$logmKWH[465:476])^2)
+errorb = sum((pred.b-elec$logmKWH[465:476])^2)
+errorcom = sum((composite-elec$logmKWH[465:476])^2)
+errord = sum((pred.d2-elec$logmKWH[465:476])^2)
+compareh = cbind(errorb, errorc, errord, errorcom)
+```
+
+2 (a)  Calculate the excess kurtosis for the monthly log values.
+```{r}
+#install.packages("moments")
+library(moments)
+kurtosis(elec$logmKWH)
+```
+
+(b)  Fit an ARMA-GARCH(1,1) model to the series.  To do so in JMP, use the two-step procedure described in the notes.  With R the fit can be performed in one step; see the notes for the required command.  
+```{r}
+logmk.ts = ts(elec$logmKWH)
+install.packages("fGarch")
+library(fGarch)
+armagarch = garchFit(~arma(3, 0) + garch(1,1), data = ts(elec$logmKWH), trace = FALSE)
+summary(armagarch)
+armagarch.re = resid(armagarch)
+acf(ts(resid(armagarch)))
+```
+
+(c)  Describe briefly the ARMA-GARCH model you have fit.   If you are using R, compute the kurtosis of the standardized residuals from your ARMA-GARCH(1,1) fit and compare it to the kurtosis calculation in part (a).  Is the GARCH fit actually necessary?  
+```{r}
+resid3 = residuals(armagarch, standardize = TRUE)
+kurtosis(resid3)
+```
+
+
+
+
+
+
